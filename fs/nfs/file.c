@@ -41,9 +41,50 @@
 #include "nfstrace.h"
 
 //== add code
+#include "my_LRU_cache.h"
+
+//== add code
 const char *LDB_file_filter_list[LDB_MAX_FILE_NUM] = {
-	"sbtest/table1.ibd",
-	"sbtest/table2.ibd"
+	"sbtest/sbtest1.ibd",
+	"sbtest/sbtest2.ibd",
+	"sbtest/sbtest3.ibd",
+	"sbtest/sbtest4.ibd",
+	"sbtest/sbtest5.ibd",
+	"sbtest/sbtest6.ibd",
+	"sbtest/sbtest7.ibd",
+	"sbtest/sbtest8.ibd",
+	"sbtest/sbtest9.ibd",
+	"sbtest/sbtest10.ibd",
+	"sbtest/sbtest11.ibd",
+	"sbtest/sbtest12.ibd",
+	"sbtest/sbtest13.ibd",
+	"sbtest/sbtest14.ibd",
+	"sbtest/sbtest15.ibd",
+	"sbtest/sbtest16.ibd",
+	"sbtest/sbtest17.ibd",
+	"sbtest/sbtest18.ibd",
+	"sbtest/sbtest19.ibd",
+	"sbtest/sbtest20.ibd",
+	"sbtest/sbtest21.ibd",
+	"sbtest/sbtest22.ibd",
+	"sbtest/sbtest23.ibd",
+	"sbtest/sbtest24.ibd",
+	"sbtest/sbtest25.ibd",
+	"sbtest/sbtest26.ibd",
+	"sbtest/sbtest27.ibd",
+	"sbtest/sbtest28.ibd",
+	"sbtest/sbtest29.ibd",
+	"sbtest/sbtest30.ibd",
+	"sbtest/sbtest31.ibd",
+	"sbtest/sbtest32.ibd",
+	"sbtest/sbtest33.ibd",
+	"sbtest/sbtest34.ibd",
+	"sbtest/sbtest35.ibd",
+	"sbtest/sbtest36.ibd",
+	"sbtest/sbtest37.ibd",
+	"sbtest/sbtest38.ibd",
+	"sbtest/sbtest39.ibd",
+	"sbtest/sbtest40.ibd"
 };
 
 #define NFSDBG_FACILITY		NFSDBG_FILE
@@ -171,14 +212,86 @@ nfs_file_read(struct kiocb *iocb, struct iov_iter *to)
 	struct inode *inode = file_inode(iocb->ki_filp);
 	ssize_t result;
 
+	//== add code
+	dprintk("NFS: read(%pD2, %zu@%lu)\n",
+		iocb->ki_filp,
+		iov_iter_count(to), (unsigned long) iocb->ki_pos);
+	// check LRU cache
+	// if file in LDB_file_filter_list
+	char mybuf[PATH_MAX]; // PATH_MAX is defined in linux/limits.h
+	const char *file_path;
+	file_path = my_get_file_path(iocb->ki_filp, mybuf, PATH_MAX);
+	if (file_path) {
+		printk(KERN_INFO "[MY] Checking file path: %s\n", file_path);
+		if( my_in_filter_list(file_path) ){
+			printk(KERN_INFO "[MY]=== search cache nfs_file_read(%pD2, %zu@%Ld)\n",
+			       iocb->ki_filp, iov_iter_count(to), (long long) iocb->ki_pos);
+
+			// read from cache
+			// align by PAGE_SIZE
+			loff_t begin_offset = iocb->ki_pos;
+			size_t length = iov_iter_count(to);
+			loff_t end_offset = iocb->ki_pos + length -1;
+			ssize_t readed_size = 0;
+			for(loff_t offset = begin_offset; offset <= end_offset; offset += PAGE_SIZE){
+				printk(KERN_INFO "[MY]=== search cache (inode = %lu, offset = %Ld)\n",
+				       inode->i_ino, offset);
+
+				struct cache_entry *entry = my_cache_lookup(inode->i_ino, offset);
+				if(entry){
+					printk(KERN_INFO "[MY]=== hit cache (inode = %lu, offset = %Ld, size = %Ld)\n",
+					       inode->i_ino, offset, (long long) entry->value->size);
+
+				}
+				copy_to_iter(entry->value->data, entry->value->size, to);
+				readed_size += entry->value->size;
+				iocb->ki_pos += entry->value->size;  // 更新文件的读取位置
+			}
+			if(readed_size==length){
+				return length;
+			}else if(readed_size > length){
+				printk(KERN_INFO "[MY]=== readed_size = %lu, length = %lu)\n",
+				       readed_size, length);
+				return length;
+			}else{// readed_size < length, continue
+				printk(KERN_INFO "[MY]=== readed_size = %lu, length = %lu)\n",
+				       readed_size, length);
+			}
+
+/*
+			struct cache_entry *entry = my_cache_lookup(inode->i_ino, iocb->ki_pos);
+			if(entry){
+				printk(KERN_INFO "[MY]=== hit cache nfs_file_read(%pD2, %zu@%Ld)\n",
+				       iocb->ki_filp, iov_iter_count(to), (long long) iocb->ki_pos);
+				printk(KERN_INFO "[MY]=== hit cache nfs_file_read, need %zu, get %Ld\n",
+				       iov_iter_count(to), (long long) entry->value->size);
+				// 确保请求的读取不超出文件实际大小
+				// iocb->ki_pos - entry->key.ki_pos: entry中对应当前读取操作的起始位
+				// 如果pos大于entry->offset，意味着读取请求是从缓存数据的中间某处开始的
+				loff_t current_offset_in_entry = iocb->ki_pos - entry->key.ki_pos;
+				ssize_t available = min(entry->value->size - current_offset_in_entry, iov_iter_count(to));
+				if (available <= 0) {
+					// 已经到达文件末尾
+					return 0;
+				}
+
+				copy_to_iter(entry->value->data + current_offset_in_entry, available, to);
+				iocb->ki_pos += available;  // 更新文件的读取位置
+				return available;
+			}else{
+				printk(KERN_INFO "[MY]=== miss cache nfs_file_read(%pD2, %zu@%Ld)\n",
+				       iocb->ki_filp, iov_iter_count(to), (long long) iocb->ki_pos);
+			}
+			*/
+		}
+	}
+
 	if (iocb->ki_flags & IOCB_DIRECT)
 		return nfs_file_direct_read(iocb, to, false);
 
 	dprintk("NFS: read(%pD2, %zu@%lu)\n",
 		iocb->ki_filp,
 		iov_iter_count(to), (unsigned long) iocb->ki_pos);
-
-	//== add code
 
 	nfs_start_io_read(inode);
 	result = nfs_revalidate_mapping(inode, iocb->ki_filp->f_mapping);
@@ -623,10 +736,44 @@ ssize_t nfs_file_write(struct kiocb *iocb, struct iov_iter *from)
 	if (file_path) {
 		printk(KERN_INFO "[MY] Checking file path: %s\n", file_path);
 		if( my_in_filter_list(file_path) ){
-			// ban write
-			printk(KERN_INFO "[MY]=== filter nfs_file_write(%pD2, %zu@%Ld)\n",
-				file, iov_iter_count(from), (long long) iocb->ki_pos);
-			return iov_iter_count(from);// Get the size of the input data
+//			// ban write to nfs server
+//			//cache write
+//			size_t size = iov_iter_count(from);
+//			my_cache_add(inode->i_ino, iocb->ki_pos, from);//change struct iov_iter *from
+//			printk(KERN_INFO "[MY]=== cache nfs_file_write(%pD2, %zu@%Ld)\n",
+//			       file, size, (long long) iocb->ki_pos);
+//			return size;// Get the size of the input data
+
+			size_t length = iov_iter_count(from);
+			printk(KERN_INFO "[MY]=== cache nfs_file_write(%pD2, %zu@%Ld)\n",
+			       file, length, (long long) iocb->ki_pos);
+
+			// write to cache
+			// align by PAGE_SIZE
+			loff_t begin_offset = iocb->ki_pos;
+			loff_t end_offset = iocb->ki_pos + length - 1;
+			ssize_t writed_size = 0;
+			for(loff_t offset = begin_offset; offset <= end_offset; offset += PAGE_SIZE){
+				ssize_t size = PAGE_SIZE;
+				if(offset + PAGE_SIZE>end_offset)
+					size = end_offset - offset + 1;
+
+				printk(KERN_INFO "[MY]=== write cache (inode = %lu, offset = %Ld, size = %Ld)\n",
+				       inode->i_ino, offset, size);
+
+				my_cache_add(inode->i_ino, iocb->ki_pos, from, size);//change struct iov_iter *from
+				writed_size += size;
+			}
+			if(writed_size==length){
+				return length;
+			}else if(writed_size > length){
+				printk(KERN_INFO "[MY]=== writed_size = %lu, length = %lu)\n",
+				       writed_size, length);
+				return length;
+			}else{// writed_size < length, continue
+				printk(KERN_INFO "[MY]=== writed_size = %lu, length = %lu)\n",
+				      writed_size, length);
+			}
 		}
 	}
 
